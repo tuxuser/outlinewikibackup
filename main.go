@@ -14,6 +14,7 @@ import (
 
 	"github.com/stenstromen/outlinewikibackup/api"
 	"github.com/stenstromen/outlinewikibackup/file"
+	"github.com/stenstromen/outlinewikibackup/gitapi"
 	"github.com/stenstromen/outlinewikibackup/s3api"
 
 	smithyendpoints "github.com/aws/smithy-go/endpoints"
@@ -83,6 +84,17 @@ func init() {
 			log.Println("S3/MinIO connectivity check disabled via MINIMAL_S3_PERMISSIONS")
 		}
 	}
+
+	// Check Git configuration if UPLOAD_TO_GIT is enabled
+	if os.Getenv("UPLOAD_TO_GIT") == "true" {
+		if _, exists := os.LookupEnv("GIT_REPO_URL"); !exists {
+			log.Fatal("GIT_REPO_URL environment variable is not set.")
+		}
+		if _, exists := os.LookupEnv("GIT_DEPLOY_TOKEN"); !exists {
+			log.Fatal("GIT_DEPLOY_TOKEN environment variable is not set.")
+		}
+		log.Println("Git backup target enabled")
+	}
 }
 
 func main() {
@@ -112,6 +124,9 @@ func main() {
 	log.Println("File downloaded successfully:", filename)
 
 	uploadToS3Flag := os.Getenv("UPLOAD_TO_S3")
+	uploadToGitFlag := os.Getenv("UPLOAD_TO_GIT")
+
+	// Handle S3 upload if enabled
 	if uploadToS3Flag == "true" {
 		log.Println("Uploading file to S3/MinIO...")
 		err = file.UploadToS3(filename)
@@ -120,6 +135,21 @@ func main() {
 			return
 		}
 		log.Println("File uploaded successfully to S3/MinIO")
+	}
+
+	// Handle Git upload if enabled
+	if uploadToGitFlag == "true" {
+		log.Println("Uploading backup to Git repository...")
+		err = gitapi.UploadToGit(filename)
+		if err != nil {
+			log.Println("Error uploading to Git repository:", err)
+			return
+		}
+		log.Println("Backup uploaded successfully to Git repository")
+	}
+
+	// Cleanup local file if at least one upload target is enabled and succeeded
+	if uploadToS3Flag == "true" || uploadToGitFlag == "true" {
 		if err := os.Remove(filename); err != nil {
 			log.Println("Error deleting file:", err)
 			return
@@ -135,15 +165,19 @@ func main() {
 	}
 	log.Println("Export deleted successfully!")
 
+	// Note: Git cleanup happens automatically via the full sync approach
+	// (each backup replaces all files in the backup directory)
+	// Only S3 needs explicit cleanup for old backups
+
 	keepBackups := os.Getenv("KEEP_BACKUPS")
-	if keepBackups != "" {
+	if keepBackups != "" && uploadToS3Flag == "true" {
 		log.Println("Keeping only", keepBackups, "backups")
 		err = file.KeepOnlyNBackups(keepBackups)
 		if err != nil {
 			log.Println("Error keeping only", keepBackups, "backups:", err)
 			return
 		}
-	} else {
+	} else if keepBackups == "" && uploadToS3Flag == "true" {
 		log.Println("Keeping all backups")
 	}
 
