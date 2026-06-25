@@ -44,15 +44,29 @@ ghcr.io/stenstromen/outlinewikibackup:latest
 
 ### Run backup to Git repository using Podman
 
-The Git backup target extracts the zip archive and commits the bare files (markdown, images, binaries) to a Git repository. Each backup creates one atomic commit with a timestamp. Files not in the current backup are automatically deleted.
+The Git backup target extracts the zip archive and commits the bare files (markdown, images, binaries) to a Git repository using SSH authentication. Each backup creates one atomic commit with a timestamp. Files not in the current backup are automatically deleted.
 
 ```bash
 podman run --rm \
 -v /tmp:/tmp:rw \
 -e API_BASE_URL='https://myoutlinewiki.example.com' \
 -e AUTH_TOKEN='ol_api_abcd1234' \
--e GIT_REPO_URL='https://github.com/user/repo.git' \
--e GIT_DEPLOY_TOKEN='ghp_xxxxxxxxxxxxxxxxxxxx' \
+-e GIT_REPO_URL='git@github.com:user/repo.git' \
+-e GIT_SSH_KEY='-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----' \
+-e UPLOAD_TO_GIT='true' \
+ghcr.io/stenstromen/outlinewikibackup:latest
+```
+
+For security, it's recommended to mount the SSH key from a file:
+
+```bash
+podman run --rm \
+-v /tmp:/tmp:rw \
+-v $HOME/.ssh/id_rsa:/run/secrets/ssh_key:ro \
+-e API_BASE_URL='https://myoutlinewiki.example.com' \
+-e AUTH_TOKEN='ol_api_abcd1234' \
+-e GIT_REPO_URL='git@github.com:user/repo.git' \
+-e GIT_SSH_KEY="$(cat /run/secrets/ssh_key)" \
 -e UPLOAD_TO_GIT='true' \
 ghcr.io/stenstromen/outlinewikibackup:latest
 ```
@@ -69,8 +83,8 @@ podman run --rm \
 -e MINIO_ENDPOINT='https://minio.example.com' \
 -e S3_BUCKET_NAME='outline' \
 -e UPLOAD_TO_S3='true' \
--e GIT_REPO_URL='https://github.com/user/repo.git' \
--e GIT_DEPLOY_TOKEN='ghp_xxxxxxxxxxxxxxxxxxxx' \
+-e GIT_REPO_URL='git@github.com:user/repo.git' \
+-e GIT_SSH_KEY='-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----' \
 -e UPLOAD_TO_GIT='true' \
 ghcr.io/stenstromen/outlinewikibackup:latest
 ```
@@ -273,8 +287,8 @@ spec:
 - `MINIO_ENDPOINT`: The MinIO endpoint URL, required if using MinIO.
 - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: Credentials for AWS S3 or MinIO.
 - `UPLOAD_TO_GIT` (optional): If set to `"true"`, the backup will be extracted and committed to a Git repository.
-- `GIT_REPO_URL` (optional): The Git repository HTTPS URL (e.g., `https://github.com/user/repo.git`). Required if `UPLOAD_TO_GIT` is true.
-- `GIT_DEPLOY_TOKEN` (optional): Personal access token with repository write permissions. Required if `UPLOAD_TO_GIT` is true.
+- `GIT_REPO_URL` (optional): The Git repository SSH URL (e.g., `git@github.com:user/repo.git`). Required if `UPLOAD_TO_GIT` is true.
+- `GIT_SSH_KEY` (optional): SSH private key content. Required if `UPLOAD_TO_GIT` is true.
 - `GIT_BRANCH` (optional): The branch to push to, defaults to `main`.
 - `GIT_BACKUP_DIR` (optional): The subdirectory in the repository for backups, defaults to `outline-backup`.
 - `GIT_COMMIT_MESSAGE` (optional): Commit message template, supports `{timestamp}` placeholder, defaults to `"Outline Wiki backup {timestamp}"`.

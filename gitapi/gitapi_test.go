@@ -6,12 +6,18 @@ import (
 )
 
 func TestNewGitConfig(t *testing.T) {
-	// Set up environment variables
-	os.Setenv("GIT_REPO_URL", "https://github.com/test/repo.git")
-	os.Setenv("GIT_DEPLOY_TOKEN", "ghp_test_token")
+	// Set up environment variables with a proper SSH private key format
+	privateKey := `-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MxUK
+kYZnd3ThH9ZHx0y0vVVL2K75f3YHR0x1Jw2qn+XeE8Aj4imx1I
+...base64 encoded key data...
+-----END RSA PRIVATE KEY-----`
+	
+	os.Setenv("GIT_REPO_URL", "git@github.com:test/repo.git")
+	os.Setenv("GIT_SSH_KEY", privateKey)
 	defer func() {
 		os.Unsetenv("GIT_REPO_URL")
-		os.Unsetenv("GIT_DEPLOY_TOKEN")
+		os.Unsetenv("GIT_SSH_KEY")
 	}()
 
 	cfg, err := NewGitConfig()
@@ -19,12 +25,12 @@ func TestNewGitConfig(t *testing.T) {
 		t.Fatalf("NewGitConfig() error = %v", err)
 	}
 
-	if cfg.RepoURL != "https://github.com/test/repo.git" {
-		t.Errorf("RepoURL = %v, want %v", cfg.RepoURL, "https://github.com/test/repo.git")
+	if cfg.RepoURL != "git@github.com:test/repo.git" {
+		t.Errorf("RepoURL = %v, want %v", cfg.RepoURL, "git@github.com:test/repo.git")
 	}
 
-	if cfg.Token != "ghp_test_token" {
-		t.Errorf("Token = %v, want %v", cfg.Token, "ghp_test_token")
+	if cfg.SSHKey != privateKey {
+		t.Errorf("SSHKey = %v, want %v", cfg.SSHKey, privateKey)
 	}
 
 	// Test defaults
@@ -51,8 +57,13 @@ func TestNewGitConfig(t *testing.T) {
 
 func TestNewGitConfigCustomValues(t *testing.T) {
 	// Set up environment variables with custom values
-	os.Setenv("GIT_REPO_URL", "https://gitlab.com/test/repo.git")
-	os.Setenv("GIT_DEPLOY_TOKEN", "glpat_test_token")
+	privateKey := `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEA
+...base64 encoded key data...
+-----END OPENSSH PRIVATE KEY-----`
+	
+	os.Setenv("GIT_REPO_URL", "git@gitlab.com:test/repo.git")
+	os.Setenv("GIT_SSH_KEY", privateKey)
 	os.Setenv("GIT_BRANCH", "backups")
 	os.Setenv("GIT_BACKUP_DIR", "my-backups")
 	os.Setenv("GIT_COMMIT_MESSAGE", "Custom backup at {timestamp}")
@@ -60,7 +71,7 @@ func TestNewGitConfigCustomValues(t *testing.T) {
 	os.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	defer func() {
 		os.Unsetenv("GIT_REPO_URL")
-		os.Unsetenv("GIT_DEPLOY_TOKEN")
+		os.Unsetenv("GIT_SSH_KEY")
 		os.Unsetenv("GIT_BRANCH")
 		os.Unsetenv("GIT_BACKUP_DIR")
 		os.Unsetenv("GIT_COMMIT_MESSAGE")
@@ -97,22 +108,24 @@ func TestNewGitConfigCustomValues(t *testing.T) {
 func TestNewGitConfigMissingRequired(t *testing.T) {
 	// Test missing GIT_REPO_URL
 	os.Unsetenv("GIT_REPO_URL")
-	os.Setenv("GIT_DEPLOY_TOKEN", "token")
-	defer os.Unsetenv("GIT_DEPLOY_TOKEN")
+	os.Unsetenv("GIT_SSH_KEY")
+	defer func() {
+		os.Unsetenv("GIT_SSH_KEY")
+	}()
 
 	_, err := NewGitConfig()
 	if err == nil {
 		t.Fatal("NewGitConfig() should error when GIT_REPO_URL is missing")
 	}
 
-	// Test missing GIT_DEPLOY_TOKEN
-	os.Setenv("GIT_REPO_URL", "https://github.com/test/repo.git")
-	os.Unsetenv("GIT_DEPLOY_TOKEN")
+	// Test missing SSH key
+	os.Setenv("GIT_REPO_URL", "git@github.com:test/repo.git")
+	os.Unsetenv("GIT_SSH_KEY")
 	defer os.Unsetenv("GIT_REPO_URL")
 
 	_, err = NewGitConfig()
 	if err == nil {
-		t.Fatal("NewGitConfig() should error when GIT_DEPLOY_TOKEN is missing")
+		t.Fatal("NewGitConfig() should error when GIT_SSH_KEY is missing")
 	}
 }
 

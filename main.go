@@ -90,8 +90,8 @@ func init() {
 		if _, exists := os.LookupEnv("GIT_REPO_URL"); !exists {
 			log.Fatal("GIT_REPO_URL environment variable is not set.")
 		}
-		if _, exists := os.LookupEnv("GIT_DEPLOY_TOKEN"); !exists {
-			log.Fatal("GIT_DEPLOY_TOKEN environment variable is not set.")
+		if _, exists := os.LookupEnv("GIT_SSH_KEY"); !exists {
+			log.Fatal("GIT_SSH_KEY environment variable is not set.")
 		}
 		log.Println("Git backup target enabled")
 	}

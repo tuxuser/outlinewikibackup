@@ -13,13 +13,13 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 )
 
 // GitConfig holds Git repository configuration
 type GitConfig struct {
 	RepoURL     string
-	Token       string
+	SSHKey      string
 	Branch      string
 	BackupDir   string
 	CommitMsg   string
@@ -34,9 +34,9 @@ func NewGitConfig() (*GitConfig, error) {
 		return nil, fmt.Errorf("GIT_REPO_URL environment variable is not set")
 	}
 
-	token := os.Getenv("GIT_DEPLOY_TOKEN")
-	if token == "" {
-		return nil, fmt.Errorf("GIT_DEPLOY_TOKEN environment variable is not set")
+	sshKey := os.Getenv("GIT_SSH_KEY")
+	if sshKey == "" {
+		return nil, fmt.Errorf("GIT_SSH_KEY environment variable is not set")
 	}
 
 	branch := os.Getenv("GIT_BRANCH")
@@ -66,7 +66,7 @@ func NewGitConfig() (*GitConfig, error) {
 
 	return &GitConfig{
 		RepoURL:     repoURL,
-		Token:       token,
+		SSHKey:      sshKey,
 		Branch:      branch,
 		BackupDir:   backupDir,
 		CommitMsg:   commitMsg,
@@ -89,8 +89,14 @@ func UploadToGit(zipPath string) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Clone repository
-	repo, err := cloneRepository(tempDir, cfg)
+	// Write SSH key to temporary file
+	sshKeyPath, err := writeSSHKey(tempDir, cfg.SSHKey)
+	if err != nil {
+		return fmt.Errorf("failed to write SSH key: %w", err)
+	}
+
+	// Clone repository using SSH
+	repo, err := cloneRepository(tempDir, sshKeyPath)
 	if err != nil {
 		return fmt.Errorf("failed to clone repository: %w", err)
 	}
@@ -112,21 +118,39 @@ func UploadToGit(zipPath string) error {
 	}
 
 	// Stage, commit, and push
-	return commitAndPush(repo, cfg, backupPath)
+	return commitAndPush(repo, cfg, backupPath, sshKeyPath)
 }
 
-// cloneRepository clones the git repository
-func cloneRepository(targetDir string, cfg *GitConfig) (*git.Repository, error) {
-	auth := &http.BasicAuth{
-		Username: "token",
-		Password: cfg.Token,
+// writeSSHKey writes the SSH private key to a temporary file with correct permissions
+func writeSSHKey(dir, sshKey string) (string, error) {
+	keyPath := filepath.Join(dir, "id_rsa")
+	// Write SSH key with 0600 permissions (required by SSH)
+	if err := os.WriteFile(keyPath, []byte(sshKey), 0600); err != nil {
+		return "", fmt.Errorf("failed to write SSH key file: %w", err)
+	}
+	return keyPath, nil
+}
+
+// cloneRepository clones the git repository using SSH authentication
+func cloneRepository(targetDir string, sshKeyPath string) (*git.Repository, error) {
+	// Create SSH public keys from the private key file
+	publicKeys, err := ssh.NewPublicKeysFromFile("git", sshKeyPath, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH public keys: %w", err)
+	}
+
+	// Get repo URL from environment
+	repoURL := os.Getenv("GIT_REPO_URL")
+	branch := os.Getenv("GIT_BRANCH")
+	if branch == "" {
+		branch = "main"
 	}
 
 	// Try with branch first
-	referenceName := plumbing.NewBranchReferenceName(cfg.Branch)
+	referenceName := plumbing.NewBranchReferenceName(branch)
 	repo, err := git.PlainClone(targetDir, false, &git.CloneOptions{
-		URL:           cfg.RepoURL,
-		Auth:          auth,
+		URL:           repoURL,
+		Auth:          publicKeys,
 		Depth:         1,
 		ReferenceName: referenceName,
 		SingleBranch:  true,
@@ -137,14 +161,14 @@ func cloneRepository(targetDir string, cfg *GitConfig) (*git.Repository, error) 
 		if isBranchNotFound(err) {
 			// Try without specifying branch (will use default branch)
 			repo, err = git.PlainClone(targetDir, false, &git.CloneOptions{
-				URL:      cfg.RepoURL,
-				Auth:     auth,
+				URL:      repoURL,
+				Auth:     publicKeys,
 				Depth:    1,
 				Progress: os.Stdout,
 			})
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to clone repository from %s: %w", cfg.RepoURL, err)
+			return nil, fmt.Errorf("failed to clone repository from %s: %w", repoURL, err)
 		}
 	}
 	return repo, nil
@@ -202,7 +226,7 @@ func extractZip(zipPath string, targetDir string) error {
 }
 
 // commitAndPush stages, commits, and pushes the changes
-func commitAndPush(repo *git.Repository, cfg *GitConfig, backupDir string) error {
+func commitAndPush(repo *git.Repository, cfg *GitConfig, backupDir string, sshKeyPath string) error {
 	worktree, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
@@ -232,15 +256,15 @@ func commitAndPush(repo *git.Repository, cfg *GitConfig, backupDir string) error
 
 	log.Printf("Created commit: %s", commitHash.String()[:7])
 
-	// Push
-	auth := &http.BasicAuth{
-		Username: "token",
-		Password: cfg.Token,
+	// Push using SSH authentication
+	publicKeys, err := ssh.NewPublicKeysFromFile("git", sshKeyPath, "")
+	if err != nil {
+		return fmt.Errorf("failed to create SSH public keys for push: %w", err)
 	}
 
 	err = repo.Push(&git.PushOptions{
 		RemoteName: "origin",
-		Auth:       auth,
+		Auth:       publicKeys,
 		Progress:   os.Stdout,
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
